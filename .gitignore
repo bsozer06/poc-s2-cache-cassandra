@@ -1,0 +1,42 @@
+node_modules/
+dist/
+build/
+.env
+.vscode/
+.DS_Store
+*.log
+coverage/
+.idea/
+*.iml
+npm-debug.log*
+yarn-error.log*
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+# Jupyter
+*.ipynb_checkpoints
+# Docker
+*.pid
+docker-compose.override.yml
+# Cassandra
+*.db
+commitlog/
+saved_caches/
+logs/
+# React/Vite
+react-client/node_modules/
+react-client/dist/
+react-client/build/
+# FastAPI
+*.sqlite3
+# Misc
+*.swp
+*.swo
+*.bak
+*.tmp
+*.cache

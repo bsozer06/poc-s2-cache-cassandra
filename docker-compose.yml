@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  cassandra:
+    image: cassandra:latest
+    container_name: cassandra-timeseries
+    ports:
+      - "9042:9042"
+    volumes:
+      - ./cassandra_timeseries_location.cql:/docker-entrypoint-initdb.d/cassandra_timeseries_location.cql
+    environment:
+      - CASSANDRA_CLUSTER_NAME=TimeseriesCluster
+      - CASSANDRA_DC=dc1
+      - CASSANDRA_RACK=rack1
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+  init-cql:
+    image: cassandra:latest
+    depends_on:
+      - cassandra
+    volumes:
+      - ./cassandra_timeseries_location.cql:/cassandra_timeseries_location.cql
+    entrypoint: ["/bin/bash", "-c", "sleep 30 && cqlsh cassandra 9042 -f /cassandra_timeseries_location.cql"]
