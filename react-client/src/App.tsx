@@ -12,19 +12,29 @@ import { Icon, Style } from 'ol/style';
 import { Circle as CircleStyle, Fill, Stroke } from 'ol/style';
 import 'ol/ol.css';
 
-const API_URL = 'http://localhost:8000/locations?device_id=dev001&start=2026-02-02T10:00:00&end=2026-02-02T11:00:00';
+const DEVICES_API_URL = 'http://localhost:8000/devices-in-range?date=2026-02-02&start=2026-02-02T00:00:00&end=2026-02-02T23:59:59';
+const API_URL = 'http://localhost:8000/all-locations?date=2026-02-02&start=2026-02-02T00:00:00&end=2026-02-02T23:59:59';
 
 const App: React.FC = () => {
   const mapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+
+    async function fetchDevices() {
+      const response = await fetch(DEVICES_API_URL);
+      const devices = await response.json();
+      console.log('API devices:', devices);
+      return devices;
+    }
+
     async function fetchLocations() {
       const response = await fetch(API_URL);
       return await response.json();
     }
 
     async function initMap() {
-      const locations = await fetchLocations();
+      const locations = await fetchDevices();
+      // const locations = await fetchLocations();
       console.log('API locations:', locations);
       // Her device_id için farklı renkler
       const deviceColors: Record<string, string> = {
