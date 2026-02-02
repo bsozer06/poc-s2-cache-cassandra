@@ -33,20 +33,23 @@ def get_devices_in_range(
     try:
         start_dt = datetime.fromisoformat(start)
         end_dt = datetime.fromisoformat(end)
-        query = f"""
-            SELECT device_id, ts, latitude, longitude FROM {TABLE}
-            WHERE date = %s AND ts >= %s AND ts <= %s ALLOW FILTERING
-        """
-        rows = session.execute(query, (date, start_dt, end_dt))
-        return [
-        {
-            "device_id": row.device_id,
-            "timestamp": row.ts.isoformat(),
-            "latitude": row.latitude,
-            "longitude": row.longitude
-        }
-        for row in rows
-    ]
+        # Use static device_id list (as in simulator)
+        device_ids = ['dev001', 'dev002', 'dev003', 'dev004', 'dev005']
+        results = []
+        for device_id in device_ids:
+            data_query = f"""
+                SELECT device_id, ts, latitude, longitude FROM {TABLE}
+                WHERE date = %s AND device_id = %s AND ts >= %s AND ts <= %s
+            """
+            rows = session.execute(data_query, (date, device_id, start_dt, end_dt))
+            for row in rows:
+                results.append({
+                    "device_id": row.device_id,
+                    "timestamp": row.ts.isoformat(),
+                    "latitude": row.latitude,
+                    "longitude": row.longitude
+                })
+        return results
     except Exception as e:
         return {"error": str(e)}
 

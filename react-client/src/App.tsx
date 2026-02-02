@@ -10,6 +10,8 @@ import VectorLayer from 'ol/layer/Vector';
 import { fromLonLat } from 'ol/proj';
 import { Icon, Style } from 'ol/style';
 import { Circle as CircleStyle, Fill, Stroke } from 'ol/style';
+import Text from 'ol/style/Text';
+import Cluster from 'ol/source/Cluster';
 import 'ol/ol.css';
 
 const DEVICES_API_URL = 'http://localhost:8000/devices-in-range?date=2026-02-02&start=2026-02-02T00:00:00&end=2026-02-02T23:59:59';
@@ -20,21 +22,20 @@ const App: React.FC = () => {
 
   useEffect(() => {
 
-    async function fetchDevices() {
-      const response = await fetch(DEVICES_API_URL);
-      const devices = await response.json();
-      console.log('API devices:', devices);
-      return devices;
-    }
+    // async function fetchDevices() {
+    //   const response = await fetch(DEVICES_API_URL);
+    //   const devices = await response.json();
+    //   console.log('API devices:', devices);
+    //   return devices;
+    // }
 
     async function fetchLocations() {
-      const response = await fetch(API_URL);
+      const response = await fetch(DEVICES_API_URL);
       return await response.json();
     }
 
     async function initMap() {
-      const locations = await fetchDevices();
-      // const locations = await fetchLocations();
+      const locations = await fetchLocations();
       console.log('API locations:', locations);
       // Her device_id için farklı renkler
       const deviceColors: Record<string, string> = {
@@ -49,6 +50,7 @@ const App: React.FC = () => {
         return deviceColors[deviceId] || '#34495e';
       }
 
+      // Nokta marker'ları
       const features = Array.isArray(locations)
         ? locations
             .filter((loc: any) => typeof loc.longitude === 'number' && typeof loc.latitude === 'number')
@@ -65,29 +67,72 @@ const App: React.FC = () => {
                   })
                 })
               );
+              feature.set('weight', 1);
+              feature.set('device_id', loc.device_id);
+              feature.set('timestamp', loc.timestamp);
               return feature;
             })
         : [];
       console.log('Marker count:', features.length);
 
-      const vectorSource = new VectorSource({ features });
-      const vectorLayer = new VectorLayer({ source: vectorSource });
 
+      // Cluster için kaynak oluştur
+      const markerSource = new VectorSource({ features });
+      const clusterSource = new Cluster({
+        distance: 40,
+        source: markerSource
+      });
+      const clusterLayer = new VectorLayer({
+        source: clusterSource,
+        style: function (feature) {
+          const features = feature.get('features');
+          const size = features.length;
+          if (size === 1) {
+            // Tek marker ise orijinal stilini kullan
+            return features[0].getStyle();
+          }
+          // Cluster içindeki en çok bulunan device_id'yi bul
+          const deviceCount = {};
+          features.forEach((f) => {
+            const deviceId = f.get('device_id');
+            if (deviceId) deviceCount[deviceId] = (deviceCount[deviceId] || 0) + 1;
+          });
+          let maxDevice = null;
+          let maxCount = 0;
+          Object.entries(deviceCount).forEach(([deviceId, count]) => {
+            if (count > maxCount) {
+              maxDevice = deviceId;
+              maxCount = count;
+            }
+          });
+          const color = maxDevice ? getColor(maxDevice) : '#34495e';
+          return new Style({
+            image: new CircleStyle({
+              radius: 12,
+              fill: new Fill({ color }),
+              stroke: new Stroke({ color: '#fff', width: 2 })
+            }),
+            text: new Text({
+              text: size.toString(),
+              fill: new Fill({ color: '#fff' })
+            })
+          });
+        }
+      });
       const map = new Map({
         target: mapRef.current!,
         layers: [
           new TileLayer({ source: new OSM() }),
-          vectorLayer
+          clusterLayer
         ],
         view: new View({
-          center: fromLonLat([29.0, 41.0]),
-          zoom: 8
+          center: fromLonLat([32.86, 39.93]),
+          zoom: 12
         })
       });
-
       // Marker'lar varsa haritayı otomatik olarak o noktaları kapsayacak şekilde zoomla
       if (features.length > 0) {
-        const extent = vectorSource.getExtent();
+        const extent = markerSource.getExtent();
         map.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 16, duration: 1000 });
       }
     }
