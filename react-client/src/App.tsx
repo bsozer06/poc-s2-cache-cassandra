@@ -15,8 +15,15 @@ import Cluster from 'ol/source/Cluster';
 import 'ol/ol.css';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, LabelList } from 'recharts';
 
-const DEVICES_API_URL = 'http://localhost:8000/devices-in-range?date=2026-02-02&start=2026-02-02T00:00:00&end=2026-02-02T23:59:59';
-const API_URL = 'http://localhost:8000/all-locations?date=2026-02-02&start=2026-02-02T00:00:00&end=2026-02-02T23:59:59';
+const today = new Date();
+const dateStr = today.toISOString().slice(0, 10); // YYYY-MM-DD
+// ISO 8601 formatında başlangıç ve bitiş tarihleri
+const startOfDay = `1970-01-21T00:00:00`;
+// const startOfDay = `${dateStr}T00:00:00`;
+const endOfDay = `2026-02-04T23:59:59`;
+// const endOfDay = `${dateStr}T23:59:59`;
+const DEVICES_API_URL = `http://localhost:8000/devices-in-range?date=${dateStr}&start=${startOfDay}&end=${endOfDay}`;
+const API_URL = `http://localhost:8000/all-locations?date=${dateStr}&start=${startOfDay}&end=${endOfDay}`;
 
 const App: React.FC = () => {
   const mapRef = useRef<HTMLDivElement>(null);
@@ -33,7 +40,8 @@ const App: React.FC = () => {
 
     async function initMap() {
             // Bar chart için her cihazın toplam yolunu çek
-            const date = '2026-02-02'; // İsterseniz dinamik yapabilirsiniz
+            const today = new Date();
+            const date = today.toISOString().slice(0, 10); // YYYY-MM-DD formatında bugünün tarihi
             const deviceIds = ['dev001', 'dev002', 'dev003', 'dev004', 'dev005'];
             const summaryResults: { device_id: string, total_distance_m: number }[] = [];
             for (const device_id of deviceIds) {
