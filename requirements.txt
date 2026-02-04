@@ -1,0 +1,5 @@
+fastapi
+pika
+cassandra-driver
+requests
+uvicorn

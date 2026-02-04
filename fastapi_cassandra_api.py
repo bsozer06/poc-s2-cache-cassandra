@@ -1,15 +1,15 @@
 
 from math import radians, cos, sin, sqrt, atan2
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from cassandra.cluster import Cluster
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Set
 import uvicorn
 
 app = FastAPI()
 
-# CORS ayarı: React client'tan gelen istekler için izin ver
+# CORS configuration: allow requests from React client
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,11 +26,58 @@ TABLE = 'location_points'
 cluster = Cluster([CASSANDRA_HOST], port=CASSANDRA_PORT)
 session = cluster.connect(KEYSPACE)
 
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Set[WebSocket] = set()
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.add(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.discard(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                print(f"Error broadcasting message: {e}")
+
+manager = ConnectionManager()
+
+@app.websocket("/ws/locations")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive by waiting for messages
+            data = await websocket.receive_text()
+            # Can receive commands from client if needed
+            print(f"Received from client: {data}")
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        print("Client disconnected")
+
+@app.post("/send-location-update")
+async def send_location_update(data: dict):
+    """Receive location updates from RabbitMQ consumer and broadcast via WebSocket"""
+    message = {
+        "type": "location_update",
+        "device_id": data.get('device_id'),
+        "timestamp": data.get('timestamp'),
+        "latitude": data.get('latitude'),
+        "longitude": data.get('longitude')
+    }
+    await manager.broadcast(message)
+    return {"status": "broadcasted"}
+
 @app.get("/devices-in-range")
 def get_devices_in_range(
-    date: str = Query(..., description="Gün (YYYY-MM-DD)", example="2026-02-02"),
-    start: str = Query(..., description="Başlangıç zamanı (ISO format)", example="2026-02-02T00:00:00"),
-    end: str = Query(..., description="Bitiş zamanı (ISO format)", example="2026-02-02T23:59:59")
+    date: str = Query(..., description="Date (YYYY-MM-DD)", example="2026-02-02"),
+    start: str = Query(..., description="Start time (ISO format)", example="2026-02-02T00:00:00"),
+    end: str = Query(..., description="End time (ISO format)", example="2026-02-02T23:59:59")
 ):
     try:
         start_dt = datetime.fromisoformat(start)

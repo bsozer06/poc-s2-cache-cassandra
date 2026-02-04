@@ -3,43 +3,48 @@ import random
 from datetime import datetime
 from cassandra.cluster import Cluster
 
-# Cassandra bağlantı bilgileri
+# Cassandra connection configuration
 # CASSANDRA_HOST = 'localhost'
 CASSANDRA_HOST = '127.0.0.1'
 CASSANDRA_PORT = 9042
 KEYSPACE = 'timeseries_location'
 TABLE = 'location_points'
 
-# Bağlantı
-cluster = Cluster([CASSANDRA_HOST], port=CASSANDRA_PORT)
-session = cluster.connect(KEYSPACE)
+import random
+import time
+import pika
+import json
 
-# Simüle edilecek cihazlar
-devices = ['dev001', 'dev002', 'dev003', 'dev004', 'dev005']
+# RabbitMQ connection
+RABBITMQ_HOST = 'localhost'
+RABBITMQ_QUEUE = 'location_data_queue'
 
-last_positions = {}
-LAT_MIN, LAT_MAX = 39.85, 39.98  # Ankara merkezine yakın dar bbox
-LON_MIN, LON_MAX = 32.75, 32.95
-STEP = 0.001  # Maksimum hareket mesafesi (derece cinsinden)
+def generate_location_data(device_id):
+    # Ankara region boundaries: lat 39.7 - 40.1, lon 32.5 - 33.0
+    return {
+        'device_id': device_id,
+        'timestamp': int(time.time()),
+        'latitude': random.uniform(39.7, 40.1),
+        'longitude': random.uniform(32.5, 33.0)
+    }
 
-while True:
-    for device_id in devices:
-        ts = datetime.utcnow()
-        date_str = ts.strftime('%Y-%m-%d')
-        # Eğer cihazın önceki konumu yoksa, random başlat
-        if device_id not in last_positions:
-            latitude = round(random.uniform(LAT_MIN, LAT_MAX), 6)
-            longitude = round(random.uniform(LON_MIN, LON_MAX), 6)
-        else:
-            prev_lat, prev_lon = last_positions[device_id]
-            # Küçük bir random adım uygula
-            latitude = round(min(max(prev_lat + random.uniform(-STEP, STEP), LAT_MIN), LAT_MAX), 6)
-            longitude = round(min(max(prev_lon + random.uniform(-STEP, STEP), LON_MIN), LON_MAX), 6)
-        last_positions[device_id] = (latitude, longitude)
-        query = f"INSERT INTO {TABLE} (date, device_id, ts, latitude, longitude) VALUES ('{date_str}', '{device_id}', '{ts}', {latitude}, {longitude});"
-        try:
-            session.execute(query)
-            print(f"{device_id} -> {ts} -> {latitude}, {longitude}")
-        except Exception as e:
-            print(f"Hata: {e}")
-    time.sleep(5)  # 5 saniyede bir veri ekle
+def send_to_rabbitmq(data):
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+    channel = connection.channel()
+    channel.queue_declare(queue=RABBITMQ_QUEUE, durable=True)
+    channel.basic_publish(
+        exchange='',
+        routing_key=RABBITMQ_QUEUE,
+        body=json.dumps(data),
+        properties=pika.BasicProperties(delivery_mode=2)  # make message persistent
+    )
+    connection.close()
+
+if __name__ == "__main__":
+    device_ids = ['dev001', 'dev002', 'dev003', 'dev004', 'dev005']
+    while True:
+        for device_id in device_ids:
+            data = generate_location_data(device_id)
+            send_to_rabbitmq(data)
+            print(f"Sent to RabbitMQ: {data}")
+        time.sleep(1)
