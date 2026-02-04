@@ -9,13 +9,13 @@ RABBITMQ_HOST = 'localhost'
 RABBITMQ_QUEUE = 'location_data_queue'
 WEBSOCKET_BROADCAST_URL = 'http://localhost:8000/send-location-update'
 
-# Cassandra bağlantısı
+# Cassandra connection
 cluster = Cluster(['127.0.0.1'])
 session = cluster.connect('timeseries_location')
 
 def insert_location(data):
     try:
-        # date alanı için Python date objesi kullan
+        # Convert timestamp to Python date object
         date_obj = datetime.utcfromtimestamp(data['timestamp']).date()
         session.execute(
             "INSERT INTO location_points (date, device_id, latitude, longitude, ts) VALUES (%s, %s, %s, %s, %s)",
@@ -33,7 +33,7 @@ def broadcast_location(data):
             "latitude": data['latitude'],
             "longitude": data['longitude']
         }
-        # FastAPI'ye HTTP POST ile bilgi gönder
+        # Send location update to FastAPI via HTTP POST
         requests.post(
             WEBSOCKET_BROADCAST_URL,
             json=message,
@@ -47,7 +47,7 @@ def callback(ch, method, properties, body):
     insert_location(data)
     print(f"Inserted to Cassandra: {data}")
     
-    # WebSocket üzerinden broadcast et
+    # Broadcast via WebSocket
     broadcast_location(data)
     
     ch.basic_ack(delivery_tag=method.delivery_tag)

@@ -24,7 +24,7 @@ interface LocationPoint {
 
 const today = new Date();
 const dateStr = today.toISOString().slice(0, 10); // YYYY-MM-DD
-// ISO 8601 formatında başlangıç ve bitiş tarihleri
+// ISO 8601 format - start and end times
 const startOfDay = `1970-01-21T00:00:00`;
 // const startOfDay = `${dateStr}T00:00:00`;
 const endOfDay = `2026-02-04T23:59:59`;
@@ -38,7 +38,7 @@ const App: React.FC = () => {
   const initialMarkerSourceRef = useRef<VectorSource | null>(null);
   const realtimeMarkerSourceRef = useRef<VectorSource | null>(null);
   const realtimeFeaturesByDeviceRef = useRef<Map<string, Feature<Point>>>({});
-  const lastLocationRef = useRef<Map<string, LocationPoint>>({}); // Son konumları takip et
+  const lastLocationRef = useRef<Map<string, LocationPoint>>({}); // Track last locations
 
   const [deviceCounts, setDeviceCounts] = useState<{ device_id: string, count: number }[]>([]);
   const [distanceData, setDistanceData] = useState<{ device_id: string, total_distance_m: number }[]>([]);
@@ -55,9 +55,9 @@ const App: React.FC = () => {
     return deviceColors[deviceId] || '#34495e';
   }
 
-  // Haversine formülü - iki konum arasındaki mesafe (meter)
+  // Haversine formula - calculate distance between two locations (meters)
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-    const R = 6371000; // Dünya yarıçapı (meter)
+    const R = 6371000; // Earth radius (meters)
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const a = 
@@ -68,7 +68,7 @@ const App: React.FC = () => {
     return R * c;
   };
 
-  // WebSocket bağlantısını kur
+  // Setup WebSocket connection
   useEffect(() => {
     const connectWebSocket = () => {
       wsRef.current = new WebSocket('ws://localhost:8000/ws/locations');
@@ -104,14 +104,14 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Haritada konum güncellemesi yap (WebSocket gerçek zamanlı veriler)
+  // Update location on map (WebSocket real-time data)
   const updateLocationOnMap = (data: LocationPoint) => {
     if (!realtimeMarkerSourceRef.current) return;
 
     const deviceId = data.device_id;
     const newGeometry = new Point(fromLonLat([data.longitude, data.latitude]));
 
-    // Grafikleri güncelle
+    // Update charts
     setDeviceCounts(prev => {
       const existing = prev.find(d => d.device_id === deviceId);
       if (existing) {
@@ -184,7 +184,7 @@ const App: React.FC = () => {
     }
 
     async function initMap() {
-      // Bar chart için her cihazın toplam yolunu çek
+      // Fetch total distance for each device from API
       const deviceIds = ['dev001', 'dev002', 'dev003', 'dev004', 'dev005'];
       const summaryResults: { device_id: string, total_distance_m: number }[] = [];
       for (const device_id of deviceIds) {
@@ -201,7 +201,7 @@ const App: React.FC = () => {
       const locations = await fetchLocations();
       console.log('API locations:', locations);
 
-      // Pie chart için device türü dağılımı
+      // Device type distribution for pie chart
       if (Array.isArray(locations)) {
         const counts: Record<string, number> = {};
         locations.forEach((loc: any) => {
@@ -210,7 +210,7 @@ const App: React.FC = () => {
         setDeviceCounts(Object.entries(counts).map(([device_id, count]) => ({ device_id, count })));
       }
 
-      // Nokta marker'ları - İLK YÜKLEMEDEKİ VERİLER (değişmeyecek)
+      // Point markers - INITIAL LOADED DATA (will not change)
       const features = Array.isArray(locations)
         ? locations
             .filter((loc: any) => typeof loc.longitude === 'number' && typeof loc.latitude === 'number')
@@ -235,7 +235,7 @@ const App: React.FC = () => {
         : [];
       console.log('Initial Marker count:', features.length);
 
-      // İlk veriler için kaynak ve cluster oluştur
+      // Create source and cluster for initial data
       initialMarkerSourceRef.current = new VectorSource({ features });
       const clusterSource = new Cluster({
         distance: 40,
@@ -247,10 +247,10 @@ const App: React.FC = () => {
           const features = feature.get('features');
           const size = features.length;
           if (size === 1) {
-            // Tek marker ise orijinal stilini kullan
+            // Single marker - use original style
             return features[0].getStyle();
           }
-          // Cluster içindeki en çok bulunan device_id'yi bul
+          // Find most common device_id in cluster
           const deviceCount = {};
           features.forEach((f) => {
             const deviceId = f.get('device_id');
@@ -279,7 +279,7 @@ const App: React.FC = () => {
         }
       });
 
-      // WebSocket gerçek zamanlı veriler için kaynak oluştur (kümeleme yok)
+      // Create source for WebSocket real-time data (no clustering)
       realtimeMarkerSourceRef.current = new VectorSource();
       const realtimeLayer = new VectorLayer({
         source: realtimeMarkerSourceRef.current
@@ -296,7 +296,7 @@ const App: React.FC = () => {
           zoom: 12
         })
       });
-      // Marker'lar varsa haritayı otomatik olarak o noktaları kapsayacak şekilde zoomla
+      // Auto-fit map to markers if present
       if (features.length > 0) {
         const extent = initialMarkerSourceRef.current!.getExtent();
         map.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 16, duration: 1000 });
@@ -306,7 +306,7 @@ const App: React.FC = () => {
     initMap();
   }, []);
 
-  // Pie chart için özel label fonksiyonu
+  // Pie chart custom label function
   const renderPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
     const RADIAN = Math.PI / 180;
     const radius = innerRadius + (outerRadius - innerRadius) * 0.7;
@@ -319,7 +319,7 @@ const App: React.FC = () => {
     );
   };
 
-  // Bar chart için özel label fonksiyonu
+  // Bar chart custom label function
   const renderBarLabel = (props) => {
     const { x, y, width, value } = props;
     return (
@@ -351,7 +351,7 @@ const App: React.FC = () => {
                 <Cell key={entry.device_id} fill={getColor(entry.device_id)} />
               ))}
             </Pie>
-            <Tooltip formatter={(v) => `${v} adet`} />
+            <Tooltip formatter={(v) => `${v} units`} />
             <Legend iconType="circle" align="center" verticalAlign="bottom" wrapperStyle={{ fontSize: 13 }} />
           </PieChart>
         </ResponsiveContainer>

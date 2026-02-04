@@ -9,7 +9,7 @@ import uvicorn
 
 app = FastAPI()
 
-# CORS ayarı: React client'tan gelen istekler için izin ver
+# CORS configuration: allow requests from React client
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,7 +26,7 @@ TABLE = 'location_points'
 cluster = Cluster([CASSANDRA_HOST], port=CASSANDRA_PORT)
 session = cluster.connect(KEYSPACE)
 
-# WebSocket bağlantılarını takip etmek için
+# WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
@@ -52,9 +52,9 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Bağlantıyı açık tutmak için mesaj bekle
+            # Keep connection alive by waiting for messages
             data = await websocket.receive_text()
-            # İstenirse client'tan komut alabilirsiniz
+            # Can receive commands from client if needed
             print(f"Received from client: {data}")
     except WebSocketDisconnect:
         manager.disconnect(websocket)
@@ -62,7 +62,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.post("/send-location-update")
 async def send_location_update(data: dict):
-    """RabbitMQ consumer'dan konum güncellemelerini al ve WebSocket üzerinden broadcast et"""
+    """Receive location updates from RabbitMQ consumer and broadcast via WebSocket"""
     message = {
         "type": "location_update",
         "device_id": data.get('device_id'),
@@ -75,9 +75,9 @@ async def send_location_update(data: dict):
 
 @app.get("/devices-in-range")
 def get_devices_in_range(
-    date: str = Query(..., description="Gün (YYYY-MM-DD)", example="2026-02-02"),
-    start: str = Query(..., description="Başlangıç zamanı (ISO format)", example="2026-02-02T00:00:00"),
-    end: str = Query(..., description="Bitiş zamanı (ISO format)", example="2026-02-02T23:59:59")
+    date: str = Query(..., description="Date (YYYY-MM-DD)", example="2026-02-02"),
+    start: str = Query(..., description="Start time (ISO format)", example="2026-02-02T00:00:00"),
+    end: str = Query(..., description="End time (ISO format)", example="2026-02-02T23:59:59")
 ):
     try:
         start_dt = datetime.fromisoformat(start)

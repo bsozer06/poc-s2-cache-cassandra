@@ -3,7 +3,7 @@ import random
 from datetime import datetime
 from cassandra.cluster import Cluster
 
-# Cassandra bağlantı bilgileri
+# Cassandra connection configuration
 # CASSANDRA_HOST = 'localhost'
 CASSANDRA_HOST = '127.0.0.1'
 CASSANDRA_PORT = 9042
@@ -15,12 +15,12 @@ import time
 import pika
 import json
 
-# RabbitMQ bağlantısı
+# RabbitMQ connection
 RABBITMQ_HOST = 'localhost'
 RABBITMQ_QUEUE = 'location_data_queue'
 
 def generate_location_data(device_id):
-    # Ankara sınırları yaklaşık: 39.7 - 40.1 enlem, 32.5 - 33.0 boylam
+    # Ankara region boundaries: lat 39.7 - 40.1, lon 32.5 - 33.0
     return {
         'device_id': device_id,
         'timestamp': int(time.time()),
