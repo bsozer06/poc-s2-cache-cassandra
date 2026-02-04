@@ -1,10 +1,10 @@
 
 from math import radians, cos, sin, sqrt, atan2
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from cassandra.cluster import Cluster
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Set
 import uvicorn
 
 app = FastAPI()
@@ -25,6 +25,53 @@ TABLE = 'location_points'
 
 cluster = Cluster([CASSANDRA_HOST], port=CASSANDRA_PORT)
 session = cluster.connect(KEYSPACE)
+
+# WebSocket bağlantılarını takip etmek için
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Set[WebSocket] = set()
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.add(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.discard(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                print(f"Error broadcasting message: {e}")
+
+manager = ConnectionManager()
+
+@app.websocket("/ws/locations")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Bağlantıyı açık tutmak için mesaj bekle
+            data = await websocket.receive_text()
+            # İstenirse client'tan komut alabilirsiniz
+            print(f"Received from client: {data}")
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        print("Client disconnected")
+
+@app.post("/send-location-update")
+async def send_location_update(data: dict):
+    """RabbitMQ consumer'dan konum güncellemelerini al ve WebSocket üzerinden broadcast et"""
+    message = {
+        "type": "location_update",
+        "device_id": data.get('device_id'),
+        "timestamp": data.get('timestamp'),
+        "latitude": data.get('latitude'),
+        "longitude": data.get('longitude')
+    }
+    await manager.broadcast(message)
+    return {"status": "broadcasted"}
 
 @app.get("/devices-in-range")
 def get_devices_in_range(

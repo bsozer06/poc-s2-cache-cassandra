@@ -2,9 +2,12 @@ import pika
 import json
 from cassandra.cluster import Cluster
 from datetime import datetime
+import requests
+import asyncio
 
 RABBITMQ_HOST = 'localhost'
 RABBITMQ_QUEUE = 'location_data_queue'
+WEBSOCKET_BROADCAST_URL = 'http://localhost:8000/send-location-update'
 
 # Cassandra bağlantısı
 cluster = Cluster(['127.0.0.1'])
@@ -21,10 +24,32 @@ def insert_location(data):
     except Exception as e:
         print(f"Cassandra insert error: {e}\nData: {data}")
 
+def broadcast_location(data):
+    try:
+        message = {
+            "type": "location_update",
+            "device_id": data['device_id'],
+            "timestamp": data['timestamp'],
+            "latitude": data['latitude'],
+            "longitude": data['longitude']
+        }
+        # FastAPI'ye HTTP POST ile bilgi gönder
+        requests.post(
+            WEBSOCKET_BROADCAST_URL,
+            json=message,
+            timeout=2
+        )
+    except Exception as e:
+        print(f"Broadcasting error: {e}")
+
 def callback(ch, method, properties, body):
     data = json.loads(body)
     insert_location(data)
     print(f"Inserted to Cassandra: {data}")
+    
+    # WebSocket üzerinden broadcast et
+    broadcast_location(data)
+    
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
 def main():

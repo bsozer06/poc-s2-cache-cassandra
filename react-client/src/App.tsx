@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Map from 'ol/Map';
 import View from 'ol/View';
 import { Tile as TileLayer } from 'ol/layer';
@@ -15,6 +15,13 @@ import Cluster from 'ol/source/Cluster';
 import 'ol/ol.css';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, LabelList } from 'recharts';
 
+interface LocationPoint {
+  device_id: string;
+  timestamp: string;
+  latitude: number;
+  longitude: number;
+}
+
 const today = new Date();
 const dateStr = today.toISOString().slice(0, 10); // YYYY-MM-DD
 // ISO 8601 formatında başlangıç ve bitiş tarihleri
@@ -27,9 +34,147 @@ const API_URL = `http://localhost:8000/all-locations?date=${dateStr}&start=${sta
 
 const App: React.FC = () => {
   const mapRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const initialMarkerSourceRef = useRef<VectorSource | null>(null);
+  const realtimeMarkerSourceRef = useRef<VectorSource | null>(null);
+  const realtimeFeaturesByDeviceRef = useRef<Map<string, Feature<Point>>>({});
+  const lastLocationRef = useRef<Map<string, LocationPoint>>({}); // Son konumları takip et
 
-  const [deviceCounts, setDeviceCounts] = React.useState<{ device_id: string, count: number }[]>([]);
-  const [distanceData, setDistanceData] = React.useState<{ device_id: string, total_distance_m: number }[]>([]);
+  const [deviceCounts, setDeviceCounts] = useState<{ device_id: string, count: number }[]>([]);
+  const [distanceData, setDistanceData] = useState<{ device_id: string, total_distance_m: number }[]>([]);
+
+  const deviceColors: Record<string, string> = {
+    dev001: '#e74c3c',
+    dev002: '#3498db',
+    dev003: '#2ecc71',
+    dev004: '#f1c40f',
+    dev005: '#9b59b6'
+  };
+
+  function getColor(deviceId: string) {
+    return deviceColors[deviceId] || '#34495e';
+  }
+
+  // Haversine formülü - iki konum arasındaki mesafe (meter)
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371000; // Dünya yarıçapı (meter)
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+  // WebSocket bağlantısını kur
+  useEffect(() => {
+    const connectWebSocket = () => {
+      wsRef.current = new WebSocket('ws://localhost:8000/ws/locations');
+
+      wsRef.current.onopen = () => {
+        console.log('WebSocket connected');
+      };
+
+      wsRef.current.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        
+        if (message.type === 'location_update') {
+          updateLocationOnMap(message);
+        }
+      };
+
+      wsRef.current.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+
+      wsRef.current.onclose = () => {
+        console.log('WebSocket disconnected, reconnecting in 3 seconds...');
+        setTimeout(connectWebSocket, 3000);
+      };
+    };
+
+    connectWebSocket();
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, []);
+
+  // Haritada konum güncellemesi yap (WebSocket gerçek zamanlı veriler)
+  const updateLocationOnMap = (data: LocationPoint) => {
+    if (!realtimeMarkerSourceRef.current) return;
+
+    const deviceId = data.device_id;
+    const newGeometry = new Point(fromLonLat([data.longitude, data.latitude]));
+
+    // Grafikleri güncelle
+    setDeviceCounts(prev => {
+      const existing = prev.find(d => d.device_id === deviceId);
+      if (existing) {
+        return prev.map(d => 
+          d.device_id === deviceId ? { ...d, count: d.count + 1 } : d
+        );
+      } else {
+        return [...prev, { device_id: deviceId, count: 1 }];
+      }
+    });
+
+    // Mesafe hesapla ve bar chart'ı güncelle
+    if (lastLocationRef.current[deviceId]) {
+      const lastLoc = lastLocationRef.current[deviceId];
+      const distance = calculateDistance(
+        lastLoc.latitude, lastLoc.longitude,
+        data.latitude, data.longitude
+      );
+      
+      setDistanceData(prev => {
+        const existing = prev.find(d => d.device_id === deviceId);
+        if (existing) {
+          return prev.map(d => 
+            d.device_id === deviceId 
+              ? { ...d, total_distance_m: d.total_distance_m + distance } 
+              : d
+          );
+        } else {
+          return [...prev, { device_id: deviceId, total_distance_m: distance }];
+        }
+      });
+    }
+
+    // Son konumu kaydet
+    lastLocationRef.current[deviceId] = data;
+
+    // Harita marker'ını güncelle
+    if (realtimeFeaturesByDeviceRef.current[deviceId]) {
+      const existingFeature = realtimeFeaturesByDeviceRef.current[deviceId];
+      existingFeature.setGeometry(newGeometry);
+      existingFeature.set('timestamp', data.timestamp);
+    } else {
+      // Yeni bir marker oluştur (WebSocket verisi için)
+      const newFeature = new Feature({
+        geometry: newGeometry
+      });
+      newFeature.setStyle(
+        new Style({
+          image: new CircleStyle({
+            radius: 8,
+            fill: new Fill({ color: getColor(deviceId) }),
+            stroke: new Stroke({ color: '#fff', width: 3 })
+          })
+        })
+      );
+      newFeature.set('device_id', deviceId);
+      newFeature.set('timestamp', data.timestamp);
+      newFeature.set('isRealtime', true);
+      
+      realtimeFeaturesByDeviceRef.current[deviceId] = newFeature;
+      realtimeMarkerSourceRef.current.addFeature(newFeature);
+    }
+  };
 
   useEffect(() => {
 
@@ -39,35 +184,22 @@ const App: React.FC = () => {
     }
 
     async function initMap() {
-            // Bar chart için her cihazın toplam yolunu çek
-            const today = new Date();
-            const date = today.toISOString().slice(0, 10); // YYYY-MM-DD formatında bugünün tarihi
-            const deviceIds = ['dev001', 'dev002', 'dev003', 'dev004', 'dev005'];
-            const summaryResults: { device_id: string, total_distance_m: number }[] = [];
-            for (const device_id of deviceIds) {
-              try {
-                const resp = await fetch(`http://localhost:8000/device-summary?device_id=${device_id}&date=${date}`);
-                const data = await resp.json();
-                summaryResults.push({ device_id, total_distance_m: data.total_distance_m || 0 });
-              } catch {
-                summaryResults.push({ device_id, total_distance_m: 0 });
-              }
-            }
-            setDistanceData(summaryResults);
+      // Bar chart için her cihazın toplam yolunu çek
+      const deviceIds = ['dev001', 'dev002', 'dev003', 'dev004', 'dev005'];
+      const summaryResults: { device_id: string, total_distance_m: number }[] = [];
+      for (const device_id of deviceIds) {
+        try {
+          const resp = await fetch(`http://localhost:8000/device-summary?device_id=${device_id}&date=${dateStr}`);
+          const data = await resp.json();
+          summaryResults.push({ device_id, total_distance_m: data.total_distance_m || 0 });
+        } catch {
+          summaryResults.push({ device_id, total_distance_m: 0 });
+        }
+      }
+      setDistanceData(summaryResults);
+
       const locations = await fetchLocations();
       console.log('API locations:', locations);
-      // Her device_id için farklı renkler
-      const deviceColors: Record<string, string> = {
-        dev001: '#e74c3c',
-        dev002: '#3498db',
-        dev003: '#2ecc71',
-        dev004: '#f1c40f',
-        dev005: '#9b59b6'
-      };
-
-      function getColor(deviceId: string) {
-        return deviceColors[deviceId] || '#34495e';
-      }
 
       // Pie chart için device türü dağılımı
       if (Array.isArray(locations)) {
@@ -78,7 +210,7 @@ const App: React.FC = () => {
         setDeviceCounts(Object.entries(counts).map(([device_id, count]) => ({ device_id, count })));
       }
 
-      // Nokta marker'ları
+      // Nokta marker'ları - İLK YÜKLEMEDEKİ VERİLER (değişmeyecek)
       const features = Array.isArray(locations)
         ? locations
             .filter((loc: any) => typeof loc.longitude === 'number' && typeof loc.latitude === 'number')
@@ -89,26 +221,25 @@ const App: React.FC = () => {
               feature.setStyle(
                 new Style({
                   image: new CircleStyle({
-                    radius: 7,
+                    radius: 6,
                     fill: new Fill({ color: getColor(loc.device_id) }),
-                    stroke: new Stroke({ color: 'white', width: 2 })
+                    stroke: new Stroke({ color: '#fff', width: 1 })
                   })
                 })
               );
-              feature.set('weight', 1);
               feature.set('device_id', loc.device_id);
               feature.set('timestamp', loc.timestamp);
+              feature.set('isInitial', true);
               return feature;
             })
         : [];
-      console.log('Marker count:', features.length);
+      console.log('Initial Marker count:', features.length);
 
-
-      // Cluster için kaynak oluştur
-      const markerSource = new VectorSource({ features });
+      // İlk veriler için kaynak ve cluster oluştur
+      initialMarkerSourceRef.current = new VectorSource({ features });
       const clusterSource = new Cluster({
         distance: 40,
-        source: markerSource
+        source: initialMarkerSourceRef.current
       });
       const clusterLayer = new VectorLayer({
         source: clusterSource,
@@ -147,11 +278,18 @@ const App: React.FC = () => {
           });
         }
       });
+
+      // WebSocket gerçek zamanlı veriler için kaynak oluştur (kümeleme yok)
+      realtimeMarkerSourceRef.current = new VectorSource();
+      const realtimeLayer = new VectorLayer({
+        source: realtimeMarkerSourceRef.current
+      });
       const map = new Map({
         target: mapRef.current!,
         layers: [
           new TileLayer({ source: new OSM() }),
-          clusterLayer
+          clusterLayer,
+          realtimeLayer
         ],
         view: new View({
           center: fromLonLat([32.86, 39.93]),
@@ -160,7 +298,7 @@ const App: React.FC = () => {
       });
       // Marker'lar varsa haritayı otomatik olarak o noktaları kapsayacak şekilde zoomla
       if (features.length > 0) {
-        const extent = markerSource.getExtent();
+        const extent = initialMarkerSourceRef.current!.getExtent();
         map.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 16, duration: 1000 });
       }
     }
@@ -169,14 +307,14 @@ const App: React.FC = () => {
   }, []);
 
   // Pie chart için özel label fonksiyonu
-  const renderPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, index, name }) => {
+  const renderPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
     const RADIAN = Math.PI / 180;
     const radius = innerRadius + (outerRadius - innerRadius) * 0.7;
     const x = cx + radius * Math.cos(-midAngle * RADIAN);
     const y = cy + radius * Math.sin(-midAngle * RADIAN);
     return (
       <text x={x} y={y} fill="#222" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize={13} fontWeight={600}>
-        {name}: {(percent * 100).toFixed(0)}%
+        {`${((percent * 100).toFixed(0))}%`}
       </text>
     );
   };
@@ -209,17 +347,11 @@ const App: React.FC = () => {
               stroke="#fff"
               strokeWidth={2}
             >
-              {deviceCounts.map((entry, idx) => (
-                <Cell key={entry.device_id} fill={
-                  entry.device_id === 'dev001' ? '#e74c3c' :
-                  entry.device_id === 'dev002' ? '#3498db' :
-                  entry.device_id === 'dev003' ? '#2ecc71' :
-                  entry.device_id === 'dev004' ? '#f1c40f' :
-                  entry.device_id === 'dev005' ? '#9b59b6' : '#34495e'
-                } />
+              {deviceCounts.map((entry) => (
+                <Cell key={entry.device_id} fill={getColor(entry.device_id)} />
               ))}
             </Pie>
-            <Tooltip formatter={(v, n, p) => `${v} adet`} />
+            <Tooltip formatter={(v) => `${v} adet`} />
             <Legend iconType="circle" align="center" verticalAlign="bottom" wrapperStyle={{ fontSize: 13 }} />
           </PieChart>
         </ResponsiveContainer>
@@ -231,15 +363,8 @@ const App: React.FC = () => {
             <YAxis type="category" dataKey="device_id" width={60} axisLine={false} tickLine={false} fontSize={13} />
             <Tooltip formatter={v => `${(v/1000).toFixed(2)} km`} />
             <Bar dataKey="total_distance_m" radius={[8, 8, 8, 8]}>
-              <LabelList dataKey="total_distance_m" content={renderBarLabel} />
               {distanceData.map((entry) => (
-                <Cell key={entry.device_id} fill={
-                  entry.device_id === 'dev001' ? '#e74c3c' :
-                  entry.device_id === 'dev002' ? '#3498db' :
-                  entry.device_id === 'dev003' ? '#2ecc71' :
-                  entry.device_id === 'dev004' ? '#f1c40f' :
-                  entry.device_id === 'dev005' ? '#9b59b6' : '#34495e'
-                } />
+                <Cell key={entry.device_id} fill={getColor(entry.device_id)} />
               ))}
             </Bar>
           </BarChart>
