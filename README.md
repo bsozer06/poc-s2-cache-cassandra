@@ -1,33 +1,39 @@
-
-
 # Cassandra Timeseries Location PoC
+
 ## Architecture
 
 ```mermaid
 flowchart LR
-	subgraph Client
-		A[React + OpenLayers Map]
+	subgraph Producer
+		A[Python Simulator]
 	end
-	subgraph API
-		B[FastAPI REST API]
+	subgraph Broker
+		B[RabbitMQ]
+	end
+	subgraph Consumer
+		C[Python Consumer]
 	end
 	subgraph DB
-		C[Cassandra DB]
+		D[Cassandra DB]
 	end
-	subgraph Simulator
-		D[Python Cassandra Simulator]
+	subgraph API
+		E[FastAPI REST API]
 	end
-	A -- HTTP/REST --> B
-	B -- CQL Query --> C
-	D -- CQL Insert --> C
+	subgraph Client
+		F[React + OpenLayers Map]
+	end
+	A -- JSON Message --> B
+	B -- Message --> C
+	C -- Insert --> D
+	E -- Query --> D
+	F -- HTTP/REST --> E
 ```
 
-
-
-This project demonstrates a Proof of Concept for timeseries-based location data storage and querying using Cassandra (via Docker), a Python simulator, and a FastAPI REST API. A React + OpenLayers client is included for map visualization and analytics dashboard.
+This project demonstrates a Proof of Concept for timeseries-based location data storage and querying using Cassandra, RabbitMQ as a message broker, a Python simulator (producer), a Python consumer, and a FastAPI REST API. A React + OpenLayers client is included for map visualization and analytics dashboard.
 
 **Features:**
-- Real-time location simulation and storage in Cassandra
+- Real-time location simulation and message-based ingestion (RabbitMQ)
+- Reliable, decoupled, and scalable data pipeline
 - FastAPI REST API for querying and reporting
 - React client with OpenLayers map, device clustering, and interactive dashboard
 - Pie chart for device type distribution
@@ -35,7 +41,7 @@ This project demonstrates a Proof of Concept for timeseries-based location data 
 
 ## Setup
 
-### 1. Start Cassandra with Docker
+### 1. Start All Services with Docker
 ```
 docker-compose up -d
 ```
@@ -55,14 +61,22 @@ source venv/bin/activate
 
 ### 4. Install Required Packages
 ```
-pip install cassandra-driver fastapi uvicorn
+pip install -r requirements.txt
 ```
 
-## Simulator
-To continuously insert simulated location data into Cassandra:
+
+## Simulator (Producer)
+To continuously send simulated location data to RabbitMQ:
 ```
 python cassandra_simulator.py
 ```
+
+## Consumer
+To consume messages from RabbitMQ and write to Cassandra:
+```
+python rabbitmq_cassandra_consumer.py
+```
+
 
 ## FastAPI REST API
 To start the API server:
@@ -88,6 +102,7 @@ python fastapi_cassandra_api.py
 #### CORS
 - CORS is enabled for all origins for development. Adjust `allow_origins` in FastAPI for production.
 
+
 ## Querying Cassandra
 In terminal:
 ```
@@ -97,9 +112,11 @@ SELECT * FROM location_points LIMIT 10;
 ```
 
 
+
 ## Notes & Improvements
 - Partition key: (date, device_id), clustering key: ts (timestamp)
-- All endpoints are optimized to use partition key (date, device_id) and do not require ALLOW FILTERING for efficient queries.
+- Message broker (RabbitMQ) decouples data ingestion and storage for reliability and scalability
+- All endpoints are optimized to use partition key (date, device_id) and do not require ALLOW FILTERING for efficient queries
 - Python-side deduplication is used for device listing
 - React client fetches and displays data on a map, clusters devices, and shows analytics dashboard (pie/bar charts)
 - Dashboard is modern, responsive, and visually enhanced
